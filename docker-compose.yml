@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  pocketbase:
+    build: . # Build from Dockerfile in the current directory
+    container_name: price-tracker-pocketbase
+    restart: unless-stopped
+    # Explicitly call the pocketbase executable with its arguments
+    command: /pb/pocketbase serve --http="0.0.0.0:8090" --automigrate=false
+    ports:
+      - "8090:8090"
+    volumes:
+      - pocketbase_data:/pb_data # Use a named volume managed by Docker
+    healthcheck: # Optional: Check if PocketBase is responsive
+      test: wget --no-verbose --tries=1 --spider http://localhost:8090/api/health || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+# Define the named volume
+volumes:
+  pocketbase_data:
