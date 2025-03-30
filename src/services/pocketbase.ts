@@ -49,14 +49,21 @@ export const logoutUser = () => {
 };
 
 export const getItems = async () => {
-  return await pb.collection('items').getFullList();
+  return await pb.collection('items').getFullList({
+    sort: '-created_at'
+  });
 };
 
-export const createItem = async (name: string, description: string) => {
+export const createItem = async (name: string, description: string | null = null, category: string | null = null) => {
+  if (!pb.authStore.model?.id) {
+    throw new Error('User not authenticated');
+  }
+
   return await pb.collection('items').create({
     name,
     description,
-    user: pb.authStore.model?.id
+    category,
+    User: pb.authStore.model.id
   });
 };
 
@@ -66,16 +73,15 @@ export const deleteItem = async (id: string) => {
 
 export const addPrice = async (itemId: string, price: number) => {
   return await pb.collection('prices').create({
-    item: itemId,
     price,
-    user: pb.authStore.model?.id
+    item: itemId
   });
 };
 
 export const getItemPrices = async (itemId: string) => {
   return await pb.collection('prices').getFullList({
     filter: `item = "${itemId}"`,
-    sort: '-created'
+    sort: '-created_at'
   });
 };
 

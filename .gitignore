@@ -25,3 +25,4 @@ pb_data/
 
 # Misc
 .DS_Store
+.cursor

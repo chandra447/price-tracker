@@ -12,9 +12,44 @@ import {
   ScrollView
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import type { LoginScreenNavigationProp } from '../types/navigation';
 import { useAuth } from '../context/auth';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTheme } from '../context/theme';
+import PriceTrackerLogo from '../components/PriceTrackerLogo';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { z } from 'zod';
+import type { LoginScreenNavigationProp, RootStackParamList } from '../types/navigation';
+
+// Define validation schemas
+const emailSchema = z.string().email('Invalid email format');
+
+const passwordSchema = z.string()
+  .min(8, 'Password must be at least 8 characters')
+  .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+  .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+  .regex(/[0-9]/, 'Password must contain at least one number');
+
+const signupSchema = z.object({
+  username: z.string().min(3, 'Username must be at least 3 characters'),
+  email: emailSchema,
+  password: passwordSchema,
+  passwordConfirm: z.string()
+}).refine(data => data.password === data.passwordConfirm, {
+  message: "Passwords don't match",
+  path: ["passwordConfirm"]
+});
+
+const loginSchema = z.object({
+  email: emailSchema,
+  password: z.string().min(1, 'Password is required')
+});
+
+type ValidationErrors = {
+  username?: string;
+  email?: string;
+  password?: string;
+  passwordConfirm?: string;
+};
 
 export default function LoginScreen() {
   const [isSignup, setIsSignup] = useState(false);
@@ -23,36 +58,107 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [error, setError] = useState('');
+  const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordsMatch, setPasswordsMatch] = useState(true);
   const navigation = useNavigation<LoginScreenNavigationProp>();
   const { signIn, signUp, isLoggedIn } = useAuth();
+  const { colors, theme } = useTheme();
 
-  // Redirect to Dashboard if already logged in
+  // Redirect to Main if already logged in
   useEffect(() => {
     if (isLoggedIn) {
-      navigation.navigate('Dashboard');
+      navigation.navigate('Main');
     }
   }, [isLoggedIn, navigation]);
 
-  const handleAuth = async () => {
-    // Input validation
+  // Check if passwords match whenever either password field changes
+  useEffect(() => {
+    if (isSignup && password && passwordConfirm) {
+      setPasswordsMatch(password === passwordConfirm);
+    } else {
+      setPasswordsMatch(true);
+    }
+  }, [password, passwordConfirm, isSignup]);
+
+  // Validate form fields as they change
+  useEffect(() => {
     if (isSignup) {
-      if (!username || !email || !password || !passwordConfirm) {
-        setError('All fields are required');
-        return;
-      }
-      if (password !== passwordConfirm) {
-        setError('Passwords do not match');
-        return;
-      }
-      if (password.length < 8) {
-        setError('Password must be at least 8 characters');
-        return;
+      try {
+        // Validate each field individually to provide specific error messages
+        if (username) {
+          z.string().min(3, 'Username must be at least 3 characters').parse(username);
+          setValidationErrors(prev => ({ ...prev, username: undefined }));
+        }
+        
+        if (email) {
+          emailSchema.parse(email);
+          setValidationErrors(prev => ({ ...prev, email: undefined }));
+        }
+        
+        if (password) {
+          passwordSchema.parse(password);
+          setValidationErrors(prev => ({ ...prev, password: undefined }));
+        }
+        
+        if (password && passwordConfirm) {
+          if (password !== passwordConfirm) {
+            setValidationErrors(prev => ({ ...prev, passwordConfirm: "Passwords don't match" }));
+          } else {
+            setValidationErrors(prev => ({ ...prev, passwordConfirm: undefined }));
+          }
+        }
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          const fieldErrors: ValidationErrors = {};
+          err.errors.forEach(error => {
+            const path = error.path[0] as keyof ValidationErrors;
+            fieldErrors[path] = error.message;
+          });
+          setValidationErrors(prev => ({ ...prev, ...fieldErrors }));
+        }
       }
     } else {
-      if (!email || !password) {
-        setError('Email and password are required');
-        return;
+      // Login validation is simpler
+      setValidationErrors({});
+    }
+  }, [username, email, password, passwordConfirm, isSignup]);
+
+  const handleAuth = async () => {
+    // Validate the entire form before submission
+    setError('');
+    
+    if (isSignup) {
+      try {
+        signupSchema.parse({ username, email, password, passwordConfirm });
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          const fieldErrors: ValidationErrors = {};
+          err.errors.forEach(error => {
+            const path = error.path[0] as keyof ValidationErrors;
+            fieldErrors[path] = error.message;
+          });
+          setValidationErrors(fieldErrors);
+          setError('Please fix the validation errors');
+          return;
+        }
+      }
+    } else {
+      try {
+        loginSchema.parse({ email, password });
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          const fieldErrors: ValidationErrors = {};
+          err.errors.forEach(error => {
+            const path = error.path[0] as keyof ValidationErrors;
+            fieldErrors[path] = error.message;
+          });
+          setValidationErrors(fieldErrors);
+          setError('Please fix the validation errors');
+          return;
+        }
       }
     }
 
@@ -63,14 +169,14 @@ export default function LoginScreen() {
       if (isSignup) {
         console.log('Attempting signup with:', { username, email });
         const result = await signUp({ username, email, password, passwordConfirm });
-        
+
         if (result.error) {
           console.error('Signup error:', result.error);
           let errorMessage = 'Registration failed. Please try again.';
-          
+
           if (typeof result.error === 'object' && result.error.message) {
             errorMessage = result.error.message;
-            
+
             // Handle specific PocketBase error messages
             if (errorMessage.includes('email already exists')) {
               errorMessage = 'Email already registered. Please use a different email or login.';
@@ -78,47 +184,40 @@ export default function LoginScreen() {
               errorMessage = 'Validation error: ' + errorMessage;
             }
           }
-          
+
           setError(errorMessage);
         } else {
           console.log('Signup successful');
-          navigation.navigate('Dashboard');
+          navigation.navigate('Main');
         }
       } else {
         console.log('Attempting login with:', { email });
         const result = await signIn(email, password);
-        
+
         if (result.error) {
           console.error('Login error:', result.error);
-          let errorMessage = 'Authentication failed. Please try again.';
-          
+          let errorMessage = 'Login failed. Please check your credentials.';
+
           if (typeof result.error === 'object' && result.error.message) {
             errorMessage = result.error.message;
-            
-            // Handle specific PocketBase error messages
-            if (errorMessage.includes('invalid credentials') || errorMessage.includes('authentication failed')) {
-              errorMessage = 'Invalid email or password. Please try again.';
-            } else if (errorMessage.includes('failed to fetch')) {
-              errorMessage = 'Network error. Please check your connection and ensure PocketBase server is running.';
-            }
           }
-          
+
           setError(errorMessage);
         } else {
           console.log('Login successful');
-          navigation.navigate('Dashboard');
+          navigation.navigate('Main');
         }
       }
     } catch (err) {
       console.error('Unexpected authentication error:', err);
-      
+
       let errorMessage = 'Authentication failed. Please try again.';
       if (err instanceof Error) {
         errorMessage = err.message || errorMessage;
       }
-      
+
       setError(errorMessage);
-      
+
       // For debugging in development
       if (__DEV__) {
         Alert.alert('Debug Info', `Error type: ${err instanceof Error ? err.constructor.name : typeof err}\nMessage: ${err instanceof Error ? err.message : String(err)}`);
@@ -129,66 +228,138 @@ export default function LoginScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        keyboardShouldPersistTaps="handled"
+      >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardView}
         >
-          <View style={styles.formContainer}>
-            <Text style={styles.title}>{isSignup ? 'Create Account' : 'Welcome Back'}</Text>
-            <Text style={styles.subtitle}>Price Tracker App</Text>
+          <View style={[styles.formContainer, { backgroundColor: colors.card }]}>
+            <View style={styles.logoContainer}>
+              <PriceTrackerLogo size={120} />
+            </View>
+            <Text style={[styles.title, { color: colors.text }]}>Welcome Back</Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Price Tracker App</Text>
 
             {isSignup && (
               <TextInput
-                style={styles.input}
+                style={[styles.input, { 
+                  borderColor: validationErrors.username ? '#e74c3c' : colors.border, 
+                  color: colors.text 
+                }]}
                 placeholder="Username"
+                placeholderTextColor={colors.textSecondary}
                 value={username}
                 onChangeText={setUsername}
                 autoCapitalize="none"
+                selectionColor={colors.accent}
               />
+            )}
+            {isSignup && validationErrors.username && (
+              <Text style={styles.fieldError}>{validationErrors.username}</Text>
             )}
 
             <TextInput
-              style={styles.input}
+              style={[styles.input, { 
+                borderColor: validationErrors.email ? '#e74c3c' : colors.border, 
+                color: colors.text 
+              }]}
               placeholder="Email"
+              placeholderTextColor={colors.textSecondary}
               value={email}
               onChangeText={setEmail}
-              autoCapitalize="none"
               keyboardType="email-address"
+              autoCapitalize="none"
+              selectionColor={colors.accent}
             />
+            {validationErrors.email && (
+              <Text style={styles.fieldError}>{validationErrors.email}</Text>
+            )}
 
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-            />
+            <View style={styles.passwordContainer}>
+                <TextInput
+                  style={[
+                    styles.input, 
+                    { 
+                      borderColor: validationErrors.password ? '#e74c3c' : colors.border, 
+                      color: colors.text, 
+                      paddingRight: 50 
+                    }
+                  ]}
+                  placeholder="Password"
+                  placeholderTextColor={colors.textSecondary}
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                  selectionColor={colors.accent}
+                />
+                <TouchableOpacity 
+                  style={styles.passwordToggle} 
+                  onPress={() => setShowPassword(!showPassword)}
+                >
+                  <Icon 
+                    name={showPassword ? 'eye-off' : 'eye'} 
+                    size={24} 
+                    color={colors.accent} 
+                  />
+                </TouchableOpacity>
+            </View>
+            {validationErrors.password && (
+              <Text style={styles.fieldError}>{validationErrors.password}</Text>
+            )}
 
             {isSignup && (
-              <TextInput
-                style={styles.input}
-                placeholder="Confirm Password"
-                value={passwordConfirm}
-                onChangeText={setPasswordConfirm}
-                secureTextEntry
-              />
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  style={[
+                    styles.input, 
+                    { 
+                      borderColor: validationErrors.passwordConfirm ? '#e74c3c' : colors.border, 
+                      color: colors.text, 
+                      paddingRight: 50 
+                    }
+                  ]}
+                  placeholder="Confirm Password"
+                  placeholderTextColor={colors.textSecondary}
+                  value={passwordConfirm}
+                  onChangeText={setPasswordConfirm}
+                  secureTextEntry={!showConfirmPassword}
+                  selectionColor={colors.accent}
+                />
+                <TouchableOpacity 
+                  style={styles.passwordToggle} 
+                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                >
+                  <Icon 
+                    name={showConfirmPassword ? 'eye-off' : 'eye'} 
+                    size={24} 
+                    color={colors.accent} 
+                  />
+                </TouchableOpacity>
+              </View>
+            )}
+            {isSignup && validationErrors.passwordConfirm && (
+              <Text style={styles.fieldError}>{validationErrors.passwordConfirm}</Text>
             )}
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
-            {isLoading ? (
-              <ActivityIndicator size="large" color="#007AFF" />
-            ) : (
-              <TouchableOpacity
-                style={styles.authButton}
-                onPress={handleAuth}
-                disabled={isLoading}
-              >
-                <Text style={styles.authButtonText}>{isSignup ? 'Sign Up' : 'Login'}</Text>
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              style={[styles.authButton, { backgroundColor: colors.accent }]}
+              onPress={handleAuth}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.authButtonText}>
+                  {isSignup ? 'Sign Up' : 'Login'}
+                </Text>
+              )}
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.toggleButton}
@@ -197,7 +368,7 @@ export default function LoginScreen() {
                 setError('');
               }}
             >
-              <Text style={styles.toggleText}>
+              <Text style={[styles.toggleText, { color: colors.accent }]}>
                 {isSignup ? 'Already have an account? Login' : 'Need an account? Sign up'}
               </Text>
             </TouchableOpacity>
@@ -211,7 +382,6 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
   },
   scrollContainer: {
     flexGrow: 1,
@@ -221,9 +391,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
   },
+  logoContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
   formContainer: {
     padding: 20,
-    backgroundColor: 'white',
     borderRadius: 10,
     margin: 20,
     shadowColor: '#000',
@@ -237,23 +410,39 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 8,
     textAlign: 'center',
-    color: '#333',
   },
   subtitle: {
     fontSize: 16,
     marginBottom: 24,
     textAlign: 'center',
-    color: '#666',
   },
   input: {
     height: 50,
-    borderColor: '#e1e1e1',
     borderWidth: 1,
     marginBottom: 16,
     paddingHorizontal: 15,
     borderRadius: 8,
-    backgroundColor: '#fff',
     fontSize: 16,
+  },
+  passwordContainer: {
+    position: 'relative',
+    width: '100%',
+  },
+  passwordToggle: {
+    position: 'absolute',
+    right: 15,
+    top: 12,
+    height: 50,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    zIndex: 1,
+  },
+  fieldError: {
+    color: '#e74c3c',
+    fontSize: 12,
+    marginTop: -12,
+    marginBottom: 12,
+    paddingHorizontal: 2,
   },
   error: {
     color: '#e74c3c',
@@ -266,11 +455,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   toggleText: {
-    color: '#007AFF',
     fontSize: 14,
   },
   authButton: {
-    backgroundColor: '#007AFF',
     padding: 15,
     borderRadius: 8,
     alignItems: 'center',

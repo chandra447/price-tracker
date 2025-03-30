@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config();
 
+// Validate required environment variables
 if (!process.env.PB_URL || !process.env.PB_ADMIN_EMAIL || !process.env.PB_ADMIN_PASSWORD) {
   console.error('Missing required environment variables');
   process.exit(1);
@@ -11,6 +12,66 @@ if (!process.env.PB_URL || !process.env.PB_ADMIN_EMAIL || !process.env.PB_ADMIN_
 
 const pb = new PocketBase(process.env.PB_URL);
 pb.autoCancellation(false);
+
+// Collection definitions
+const itemsCollection = {
+  name: 'items',
+  type: 'base',
+  fields: [
+    {
+      name: 'name',
+      type: 'text',
+      required: true,
+    },
+    {
+      name: 'description',
+      type: 'text',
+      required: false,
+    },
+    {
+      name: 'category',
+      type: 'text',
+      required: false,
+    },
+    {
+      name: 'User',
+      type: 'relation',
+      required: true,
+      maxSelect: 1,
+      collectionId: '_pb_users_auth_',
+    },
+    {
+      name: 'created_at',
+      type: 'autodate',
+      onCreate: true,
+      onUpdate: false,
+    },
+    {
+      name: 'updated_at',
+      type: 'autodate',
+      onCreate: true,
+      onUpdate: true,
+    },
+  ],
+  listRule: '@request.auth.id != "" && @request.auth.id = User.id',
+  viewRule: '@request.auth.id != "" && @request.auth.id = User.id',
+  createRule: '@request.auth.id != ""',
+  updateRule: '@request.auth.id != "" && @request.auth.id = User.id',
+  deleteRule: '@request.auth.id != "" && @request.auth.id = User.id',
+};
+
+async function deleteCollectionIfExists(collectionName: string) {
+  try {
+    const existingCollection = await pb.collections.getFirstListItem(`name="${collectionName}"`);
+    await pb.collections.delete(existingCollection.id);
+    console.log(`Deleted existing ${collectionName} collection`);
+  } catch (err: unknown) {
+    if (!(err instanceof Error && 'status' in err && err.status === 404)) {
+      console.error(`Failed to delete ${collectionName} collection:`, err);
+      throw err;
+    }
+  }
+}
 
 async function initCollections() {
   try {
@@ -20,127 +81,56 @@ async function initCollections() {
       process.env.PB_ADMIN_PASSWORD as string
     );
 
-    // Basic Items collection
-    const itemsCollection = {
-      name: 'items',
-      type: 'base',
-      fields: [
-        {
-          name: 'name',
-          type: 'text',
-          required: true
-        }
-      ]
-    };
+    // Delete existing collections
+    await deleteCollectionIfExists('items');
+    await deleteCollectionIfExists('prices');
 
-    // Basic Prices collection
-    const pricesCollection = {
+    // Create items collection
+    console.log('Creating items collection...');
+    const createdItems = await pb.collections.create(itemsCollection);
+    console.log('Created items collection:', createdItems.id);
+
+    // Wait 1 second between collection creations
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Create prices collection
+    console.log('Creating prices collection...');
+    const createdPrices = await pb.collections.create({
       name: 'prices',
       type: 'base',
       fields: [
         {
+          name: 'price',
+          type: 'number',
+          required: true,
+        },
+        {
           name: 'item',
           type: 'relation',
           required: true,
-          collectionName: 'items'
+          maxSelect: 1,
+          collectionId: createdItems.id,  // Use the ID of the created items collection
         },
         {
-          name: 'price',
-          type: 'number',
-          required: true
-        }
-      ]
-    };
-
-    console.log('Initializing collections:', {itemsCollection, pricesCollection});
-
-    // Delete existing collections if they exist
-    try {
-      const existingItems = await pb.collections.getFirstListItem(`name="${itemsCollection.name}"`);
-      await pb.collections.delete(existingItems.id);
-      console.log('Deleted existing items collection');
-    } catch (err: unknown) {
-      if (!(err instanceof Error && 'status' in err && err.status === 404)) {
-        console.error('Failed to delete items collection:', err);
-        throw err;
-      }
-    }
-
-    try {
-      const existingPrices = await pb.collections.getFirstListItem(`name="${pricesCollection.name}"`);
-      await pb.collections.delete(existingPrices.id);
-      console.log('Deleted existing prices collection');
-    } catch (err: unknown) {
-      if (!(err instanceof Error && 'status' in err && err.status === 404)) {
-        console.error('Failed to delete prices collection:', err);
-        throw err;
-      }
-    }
-
-    // Create collections one at a time with delays
-    try {
-      console.log('Creating items collection...');
-      const enhancedItemsCollection = {
-        ...itemsCollection,
-        fields: [
-          ...itemsCollection.fields,
-          {
-            name: 'description',
-            type: 'text',
-            required: false
-          },
-          {
-            name: 'category',
-            type: 'text',
-            required: false
-          }
-        ]
-      };
-      const createdItems = await pb.collections.create(enhancedItemsCollection);
-      console.log('Created items collection:', createdItems);
-
-      // Wait 1 second between collection creations
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      console.log('Creating prices collection...');
-      const enhancedPricesCollection = {
-        name: 'prices',
-        type: 'base',
-        fields: [
-          {
-            name: 'id',
-            type: 'text',
-            required: true
-          },
-          {
-            name: 'price',
-            type: 'number',
-            required: true
-          },
-          {
-            name: 'item',
-            type: 'relation',
-            required: true,
-            options: {
-              collectionId: 'items',
-              fieldId: 'id'
-            }
-          }
-        ]
-      };
-
-      const createdPrices = await pb.collections.create(enhancedPricesCollection);
-      console.log('Created prices collection:', createdPrices);
-    } catch (err: unknown) {
-      if (err instanceof Error) {
-        console.error('Detailed error:', {
-          message: err.message,
-          stack: err.stack,
-          ...(typeof err === 'object' ? err : {})
-        });
-      }
-      throw err;
-    }
+          name: 'created_at',
+          type: 'autodate',
+          onCreate: true,
+          onUpdate: false,
+        },
+        {
+          name: 'updated_at',
+          type: 'autodate',
+          onCreate: true,
+          onUpdate: true,
+        },
+      ],
+      listRule: '@request.auth.id != ""',
+      viewRule: '@request.auth.id != ""',
+      createRule: '@request.auth.id != ""',
+      updateRule: '@request.auth.id != ""',
+      deleteRule: '@request.auth.id != ""',
+    });
+    console.log('Created prices collection:', createdPrices.id);
 
     console.log('Database initialization complete');
   } catch (err) {

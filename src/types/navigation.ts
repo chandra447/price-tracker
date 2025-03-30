@@ -2,7 +2,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 
 export type RootStackParamList = {
   Login: undefined;
-  Dashboard: undefined;
+  Main: undefined;
   Analytics: undefined;
 };
 
@@ -13,7 +13,7 @@ export type LoginScreenNavigationProp = StackNavigationProp<
 
 export type DashboardScreenNavigationProp = StackNavigationProp<
   RootStackParamList,
-  'Dashboard'
+  'Main'
 >;
 
 export type AnalyticsScreenNavigationProp = StackNavigationProp<

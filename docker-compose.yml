@@ -11,12 +11,12 @@ services:
       - "8090:8090"
     volumes:
       - pocketbase_data:/pb_data # Use a named volume managed by Docker
-    healthcheck: # Optional: Check if PocketBase is responsive
-      test: wget --no-verbose --tries=1 --spider http://localhost:8090/api/health || exit 1
-      interval: 5s
-      timeout: 5s
-      retries: 5
+    # healthcheck: # Optional: Check if PocketBase is responsive
+    #   test: wget --no-verbose --tries=1 --spider http://localhost:8090/api/health || exit 1
+    #   interval: 5s
+    #   timeout: 5s
+    #   retries: 5
 
-# Define the named volume
+    # Define the named volume
 volumes:
   pocketbase_data:
